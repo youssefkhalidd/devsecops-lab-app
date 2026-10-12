@@ -2,3 +2,4 @@
 Application for DevSecOps CI/CD security testing.
 Testing automatic GitHub-to-GitLab pipeline triggering.
 test123
+aaa
