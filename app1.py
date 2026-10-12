@@ -14,7 +14,7 @@ app.config["DEBUG"] = True
 
 @app.route("/")
 def home():
-    return "DevSecOps Vulnerability Testing Lab"
+    return "DevSecOps Vulnerability Testing Lab V2"
 
 
 # VULNERABILITY 3: SQL Injection
