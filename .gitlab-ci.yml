@@ -9,28 +9,16 @@ python-validation:
   script:
     - python --version
     - python -m py_compile app1.py
-    - echo "Python syntax validation passed."
 
 source-diagnostic:
   stage: test
   image: alpine:latest
   script:
-    - |
-      echo "Pipeline commit: $CI_COMMIT_SHA"
-      echo "Pipeline branch: $CI_COMMIT_REF_NAME"
-      echo "Checking app1.py..."
-
-      if [ ! -f app1.py ]; then
-        echo "ERROR: app1.py is missing"
-        exit 1
-      fi
-
-      echo "app1.py exists"
-
-      grep -n 'subprocess.check_output' app1.py
-      grep -n 'shell=True' app1.py
-
-      sha256sum app1.py
+    - echo "Pipeline commit is $CI_COMMIT_SHA"
+    - echo "Pipeline branch is $CI_COMMIT_REF_NAME"
+    - ls -la
+    - cat app1.py
+    - sha256sum app1.py
 
 include:
   - template: Jobs/SAST.gitlab-ci.yml
