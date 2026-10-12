@@ -1,4 +1,4 @@
-name: Trigger GitLab DevSecOps Pipeline
+name: Sync GitHub to GitLab and Scan
 
 on:
   push:
@@ -10,17 +10,40 @@ permissions:
   contents: read
 
 jobs:
-  trigger-gitlab:
+  sync-and-trigger:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Trigger GitLab pipeline
+      - name: Check out GitHub repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Configure Git
+        run: |
+          git config user.name "GitHub Actions"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Synchronize GitHub to GitLab
+        env:
+          GITLAB_PUSH_TOKEN: ${{ secrets.GITLAB_PUSH_TOKEN }}
+        run: |
+          if [ -z "$GITLAB_PUSH_TOKEN" ]; then
+            echo "ERROR: GITLAB_PUSH_TOKEN is missing."
+            exit 1
+          fi
+
+          git remote add gitlab \
+            "https://oauth2:${GITLAB_PUSH_TOKEN}@gitlab.com/Youssefkhalidd/devsecops-lab-app.git"
+
+          git push gitlab HEAD:main
+
+      - name: Trigger GitLab security pipeline
         env:
           GITLAB_TRIGGER_TOKEN: ${{ secrets.GITLAB_TRIGGER_TOKEN }}
-          GITHUB_COMMIT_SHA: ${{ github.sha }}
         run: |
           if [ -z "$GITLAB_TRIGGER_TOKEN" ]; then
-            echo "GitLab trigger token is missing."
+            echo "ERROR: GITLAB_TRIGGER_TOKEN is missing."
             exit 1
           fi
 
