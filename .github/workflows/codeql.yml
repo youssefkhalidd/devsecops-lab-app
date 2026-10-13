@@ -1,0 +1,40 @@
+name CodeQL SAST
+
+on
+  push
+    branches
+      - main
+
+  pull_request
+    branches
+      - main
+
+  workflow_dispatch
+
+permissions
+  contents read
+  security-events write
+
+jobs
+  analyze
+    name Analyze Python Code
+    runs-on ubuntu-latest
+    timeout-minutes 15
+
+    permissions
+      actions read
+      contents read
+      security-events write
+
+    steps
+      - name Checkout Repository
+        uses actionscheckout@v4
+
+      - name Initialize CodeQL
+        uses githubcodeql-actioninit@v3
+        with
+          languages python
+          build-mode none
+
+      - name Perform CodeQL Analysis
+        uses githubcodeql-actionanalyze@v3
