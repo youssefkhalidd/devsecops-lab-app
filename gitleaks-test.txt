@@ -1,0 +1,1 @@
+client_secret = "q7Vn9Kp4Rz2Xm8Ld5Tf1Bw6Yh3Js0Ac9"
