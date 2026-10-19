@@ -2,8 +2,6 @@ name: Gitleaks Secret Detection
 
 on:
   push:
-    branches:
-      - main
 
   pull_request:
     branches:
