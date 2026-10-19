@@ -5,6 +5,9 @@ on:
     branches:
       - main
 
+  pull_request:
+    branches:
+      - main
 
   workflow_dispatch:
 
@@ -52,12 +55,82 @@ jobs:
           exit 1
 
       - name: ZAP Full Scan
+        id: zap_scan
+        continue-on-error: true
         uses: zaproxy/action-full-scan@v0.13.0
         with:
           target: "http://127.0.0.1:5000"
           fail_action: false
           allow_issue_writing: false
           artifact_name: zap_full_scan_report
+          cmd_options: "-J zap-report.json -r zap-report.html"
+
+      - name: Enforce High-risk security gate
+        if: always() && steps.zap_scan.outcome != 'skipped'
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import sys
+
+          report_path = "zap-report.json"
+
+          if not os.path.isfile(report_path):
+              print(
+                  "SECURITY GATE ERROR: ZAP JSON report was not generated."
+              )
+              sys.exit(1)
+
+          try:
+              with open(report_path, encoding="utf-8") as report_file:
+                  report = json.load(report_file)
+          except (OSError, json.JSONDecodeError) as exc:
+              print(f"SECURITY GATE ERROR: Cannot read ZAP report: {exc}")
+              sys.exit(1)
+
+          high_alerts = []
+
+          for site in report.get("site", []):
+              for alert in site.get("alerts", []):
+                  if str(alert.get("riskcode", "")) == "3":
+                      high_alerts.append({
+                          "name": alert.get("name", "Unnamed alert"),
+                          "url": alert.get("url", "Unknown URL"),
+                          "count": alert.get("count", "Unknown"),
+                      })
+
+          print(f"High-risk alerts found: {len(high_alerts)}")
+
+          for alert in high_alerts:
+              print(f"- {alert['name']}")
+              print(f"  URL: {alert['url']}")
+              print(f"  Instances: {alert['count']}")
+
+          if high_alerts:
+              print(
+                  "SECURITY GATE FAILED: High-risk ZAP findings "
+                  "were detected."
+              )
+              sys.exit(1)
+
+          print("SECURITY GATE PASSED: No High-risk ZAP findings detected.")
+          PY
+
+      - name: Upload ZAP JSON report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: zap-json-report
+          path: zap-report.json
+          if-no-files-found: warn
+
+      - name: Upload ZAP HTML report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: zap-html-report
+          path: zap-report.html
+          if-no-files-found: warn
 
       - name: Display Flask logs
         if: always()
