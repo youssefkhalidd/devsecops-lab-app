@@ -1,4 +1,4 @@
 pytest
 flask
 requests
-urllib3
+urllib3==1.26.4
