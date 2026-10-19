@@ -5,6 +5,10 @@ on:
     branches:
       - main
 
+  push:
+    branches:
+      - security-test/snyk    
+
   workflow_dispatch:
 
 permissions:
