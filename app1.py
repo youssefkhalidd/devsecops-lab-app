@@ -136,6 +136,18 @@ def home():
             </div>
 
             <div class="card">
+                <h2>File Reader</h2>
+
+                <p>
+                    Endpoint reserved for path-traversal testing.
+                </p>
+
+                <p class="warning">
+                    Intentionally vulnerable lab functionality.
+                </p>
+            </div>
+
+            <div class="card">
                 <h2>Security Testing</h2>
 
                 <p>
@@ -242,6 +254,31 @@ def user_lookup():
 
 
 # ==========================================
+# VULNERABILITY 7: PATH TRAVERSAL
+# ==========================================
+
+@app.route("/read-file")
+def read_file():
+    filename = request.args.get("filename", "")
+
+    # INTENTIONALLY VULNERABLE FOR SECURITY TESTING:
+    # User-controlled input is used directly to construct a file path.
+    filepath = os.path.join("uploads", filename)
+
+    try:
+        with open(filepath, "r", encoding="utf-8") as file:
+            content = file.read()
+
+        return jsonify({
+            "filename": filename,
+            "content": content
+        })
+
+    except FileNotFoundError:
+        return jsonify({"error": "File not found"}), 404
+
+
+# ==========================================
 # APPLICATION ENTRY POINT
 # ==========================================
 
@@ -251,3 +288,4 @@ if __name__ == "__main__":
         port=5000,
         debug=True
     )
+
