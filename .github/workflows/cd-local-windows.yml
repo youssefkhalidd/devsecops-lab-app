@@ -1,4 +1,4 @@
-```yaml
+
 name: Local Windows CD Security Lab
 
 on:
@@ -215,4 +215,3 @@ jobs:
 
             Remove-Item $pidFile -Force
           }
-```
