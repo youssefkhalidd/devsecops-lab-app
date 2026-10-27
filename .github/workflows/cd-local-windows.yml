@@ -1,0 +1,218 @@
+```yaml
+name: Local Windows CD Security Lab
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  deploy-and-scan:
+    name: Deploy Flask and Run Security Checks
+    runs-on: [self-hosted, Windows, X64]
+    timeout-minutes: 20
+
+    defaults:
+      run:
+        shell: pwsh
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.9'
+
+      - name: Verify environment
+        run: |
+          python --version
+          python -m pip --version
+          Write-Host "Workspace: $env:GITHUB_WORKSPACE"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+
+      - name: Run unit tests
+        run: |
+          python -m pytest -v
+
+      - name: Check application configuration
+        run: |
+          if (-not (Test-Path "$env:GITHUB_WORKSPACE\app1.py")) {
+            throw "app1.py was not found."
+          }
+
+          if (-not (Test-Path "$env:GITHUB_WORKSPACE\requirements.txt")) {
+            throw "requirements.txt was not found."
+          }
+
+          Write-Host "Required application files exist."
+
+      - name: Start Flask locally
+        run: |
+          $port = 5000
+
+          $existing = Get-NetTCPConnection `
+            -LocalPort $port `
+            -State Listen `
+            -ErrorAction SilentlyContinue
+
+          if ($existing) {
+            throw "Port $port is already in use. Stop the existing process before deployment."
+          }
+
+          $python = (Get-Command python).Source
+          $app = Join-Path $env:GITHUB_WORKSPACE "app1.py"
+          $stdout = Join-Path $env:RUNNER_TEMP "flask-stdout.log"
+          $stderr = Join-Path $env:RUNNER_TEMP "flask-stderr.log"
+
+          $env:FLASK_DEBUG = "0"
+
+          $process = Start-Process `
+            -FilePath $python `
+            -ArgumentList @($app) `
+            -WorkingDirectory $env:GITHUB_WORKSPACE `
+            -PassThru `
+            -RedirectStandardOutput $stdout `
+            -RedirectStandardError $stderr
+
+          Set-Content `
+            -Path (Join-Path $env:RUNNER_TEMP "flask-process-id.txt") `
+            -Value $process.Id
+
+          $ready = $false
+
+          for ($i = 0; $i -lt 30; $i++) {
+            Start-Sleep -Seconds 1
+
+            $process.Refresh()
+
+            if ($process.HasExited) {
+              Get-Content $stderr -ErrorAction SilentlyContinue
+              throw "Flask exited before becoming ready."
+            }
+
+            try {
+              $response = Invoke-WebRequest `
+                -Uri "http://127.0.0.1:5000/health" `
+                -TimeoutSec 2
+
+              if ($response.StatusCode -eq 200) {
+                $ready = $true
+                break
+              }
+            }
+            catch {
+              # Flask may still be starting.
+            }
+          }
+
+          if (-not $ready) {
+            Get-Content $stdout -ErrorAction SilentlyContinue
+            Get-Content $stderr -ErrorAction SilentlyContinue
+            throw "Flask did not become healthy within 30 seconds."
+          }
+
+          Write-Host "Flask is healthy at http://127.0.0.1:5000/health"
+
+      - name: Run OWASP ZAP baseline scan
+        continue-on-error: true
+        run: |
+          $report = Join-Path $env:RUNNER_TEMP "zap-report.html"
+          $docker = Get-Command docker -ErrorAction SilentlyContinue
+
+          if (-not $docker) {
+            Write-Warning "Docker is not installed. Skipping ZAP baseline scan."
+            "ZAP scan skipped: Docker unavailable." |
+              Set-Content (Join-Path $env:RUNNER_TEMP "zap-scan-status.txt")
+            exit 0
+          }
+
+          docker info *> $null
+
+          if ($LASTEXITCODE -ne 0) {
+            Write-Warning "Docker is installed but its daemon is unavailable. Skipping ZAP."
+            "ZAP scan skipped: Docker daemon unavailable." |
+              Set-Content (Join-Path $env:RUNNER_TEMP "zap-scan-status.txt")
+            exit 0
+          }
+
+          docker run --rm `
+            --network host `
+            -v "${env:RUNNER_TEMP}:/zap/wrk/:rw" `
+            ghcr.io/zaproxy/zaproxy:stable `
+            zap-baseline.py `
+            -t http://127.0.0.1:5000 `
+            -m 2 `
+            -I `
+            -r zap-report.html
+
+          $zapExitCode = $LASTEXITCODE
+
+          "ZAP exit code: $zapExitCode" |
+            Set-Content (Join-Path $env:RUNNER_TEMP "zap-scan-status.txt")
+
+          if (Test-Path $report) {
+            Write-Host "ZAP report generated."
+          } else {
+            Write-Warning "ZAP did not produce an HTML report."
+          }
+
+      - name: Verify HTTP security headers
+        continue-on-error: true
+        run: |
+          $response = Invoke-WebRequest `
+            -Uri "http://127.0.0.1:5000/" `
+            -TimeoutSec 10
+
+          $headers = $response.Headers
+
+          $requiredHeaders = @(
+            "X-Content-Type-Options",
+            "Content-Security-Policy"
+          )
+
+          foreach ($header in $requiredHeaders) {
+            if ($headers.Contains($header)) {
+              Write-Host "Present: $header"
+            } else {
+              Write-Warning "Missing: $header"
+            }
+          }
+
+      - name: Upload security reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: local-cd-security-reports
+          path: |
+            ${{ runner.temp }}/zap-report.html
+            ${{ runner.temp }}/zap-scan-status.txt
+            ${{ runner.temp }}/flask-stdout.log
+            ${{ runner.temp }}/flask-stderr.log
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Stop Flask
+        if: always()
+        run: |
+          $pidFile = Join-Path $env:RUNNER_TEMP "flask-process-id.txt"
+
+          if (Test-Path $pidFile) {
+            $flaskPid = [int](Get-Content $pidFile)
+
+            $process = Get-Process -Id $flaskPid -ErrorAction SilentlyContinue
+
+            if ($process) {
+              Stop-Process -Id $flaskPid -Force
+              Write-Host "Stopped Flask process $flaskPid."
+            }
+
+            Remove-Item $pidFile -Force
+          }
+```
